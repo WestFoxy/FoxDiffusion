@@ -1,0 +1,58 @@
+# Build trees and downloaded runtimes
+/build*/
+/out/
+/runtime/
+/CMakeFiles/
+/CMakeCache.txt
+/Testing/
+/third_party/*
+!/third_party/sdcpp-api/
+
+# Compiled files and archives
+*.exe
+*.dll
+*.lib
+*.obj
+*.pdb
+*.ilk
+*.exp
+*.zip
+*.7z
+*.tar
+*.gz
+
+# Models and generated images
+/models/
+/embeddings/
+/output/
+/smoke-results/
+*.safetensors
+*.ckpt
+*.gguf
+*.pt
+*.pth
+*.onnx
+
+# Portable application state
+settings.ini
+layout.ini
+fox-diffusion.ini
+imgui.ini
+preview-bridge.cfg
+*.log
+*.tmp
+
+# Local IDE, tool and private settings
+/.vs/
+/.vscode/
+/.idea/
+/.codex/
+/.agents/
+/.aws/
+.env
+.env.*
+*.user
+*.suo
+__pycache__/
+Thumbs.db
+.DS_Store

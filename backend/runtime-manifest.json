@@ -1,0 +1,15 @@
+{
+  "engine": "stable-diffusion.cpp",
+  "repository": "https://github.com/leejet/stable-diffusion.cpp",
+  "release": "master-889-c678dfe",
+  "commit": "c678dfe704a2230342376b46add9c8ca736a653d",
+  "windows_cuda12_x64": {
+    "engine_url": "https://github.com/leejet/stable-diffusion.cpp/releases/download/master-889-c678dfe/sd-master-c678dfe-bin-win-cuda12-x64.zip",
+    "engine_sha256": "caa31c81523613fa02f6af4c7a52f733c8fd406cfa081a15656a0555f1abc55d",
+    "runtime_url": "https://github.com/leejet/stable-diffusion.cpp/releases/download/master-889-c678dfe/cudart-sd-bin-win-cu12-x64.zip",
+    "runtime_sha256": "fe20366827d357c00797eebb58244dddab7fd9a348d70090c3871004c320f38d"
+  },
+  "required_model_families": ["sd1", "sdxl"],
+  "accepted_model_formats": ["safetensors", "ckpt"],
+  "lora": true
+}
