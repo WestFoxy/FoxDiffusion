@@ -5,6 +5,8 @@ C++20 · OpenGL · Dear ImGui · stable-diffusion.cpp
 
 ![Fox Diffusion — image generation workspace](docs/images/fox-diffusion.png)
 
+![Fox Diffusion — img2img and inpainting editor](docs/images/fox-diffusion-img2img.png)
+
 ## Features
 
 - **txt2img** — positive and negative prompts, LoRA, samplers, schedulers, and seeds.
