@@ -62,7 +62,7 @@ void initialize(HMODULE self) {
     wchar_t module_path[MAX_PATH]{};
     GetModuleFileNameW(self, module_path, MAX_PATH);
     const auto directory = std::filesystem::path(module_path).parent_path();
-    std::ifstream config(directory / L"preview-bridge.cfg");
+    std::ifstream config(directory / L"config" / L"preview-bridge.cfg");
     std::string path_utf8;
     int mode = 0, interval = 2, denoised = 1, noisy = 0;
     std::getline(config, path_utf8);

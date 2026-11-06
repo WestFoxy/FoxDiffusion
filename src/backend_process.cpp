@@ -532,10 +532,13 @@ bool BackendProcess::ensure_server(const GenerationRequest& request, std::stop_t
     std::filesystem::remove(preview_path_, preview_error);
     if (request.preview_mode > 0) {
         const auto utf8 = preview_path_.u8string();
-        std::ofstream config(executable_directory() / L"preview-bridge.cfg", std::ios::trunc);
+        const auto config_directory = executable_directory() / L"config";
+        std::filesystem::create_directories(config_directory);
+        std::ofstream config(config_directory / L"preview-bridge.cfg", std::ios::trunc);
         config << std::string(reinterpret_cast<const char*>(utf8.data()), utf8.size()) << '\n'
                << request.preview_mode << ' ' << request.preview_interval << ' '
                << request.preview_denoised << ' ' << request.preview_noisy << '\n';
+        if (!config) throw std::runtime_error("Could not write preview settings");
     }
 
     std::wstring command = quote(engine) + (request.qwen_image ? L" --diffusion-model " : L" --model ") + quote(std::filesystem::u8path(request.model_path)) +
