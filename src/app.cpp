@@ -1,4 +1,5 @@
 #include "app.hpp"
+#include "cuda_runtime.hpp"
 #include "image_io.hpp"
 #include "parameters.hpp"
 
@@ -131,12 +132,7 @@ constexpr std::array<const char*, 11> scheduler_values = {
 };
 
 std::filesystem::path application_directory() {
-#ifdef _WIN32
-    wchar_t value[MAX_PATH]{};
-    if (GetModuleFileNameW(nullptr, value, MAX_PATH) != 0)
-        return std::filesystem::path(value).parent_path();
-#endif
-    return std::filesystem::current_path();
+    return executable_directory();
 }
 
 std::filesystem::path settings_directory() {
@@ -587,9 +583,12 @@ void App::draw_preview_panel() {
 
 
 void App::draw_status_bar() {
-    if(!show_telemetry_)return;
+    // Driver compatibility must remain visible even with telemetry disabled.
     ImGui::SetCursorPosY(ImGui::GetWindowHeight() - 25.0f);
     ImGui::Separator();
+    ImGui::TextColored(cuda_driver_compatible() ? ImVec4(.65f,.75f,.65f,1) : ImVec4(1,.65f,.3f,1), "%s", cuda_driver_status().c_str());
+    if(!show_telemetry_)return;
+    ImGui::SameLine();
     const Telemetry telemetry = read_telemetry();
     if (telemetry.gpu >= 0.0f)
         ImGui::TextDisabled("FPS %.0f   CPU %.0f%%   GPU %.0f%%   RAM %.1f / %.1f GB   VRAM %.1f / %.1f GB",

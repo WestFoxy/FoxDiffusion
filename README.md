@@ -20,72 +20,88 @@ No Python is required to run the application or generate images.
 
 ## Build
 
-Requires Windows x64, Git, CMake 3.24+, and Visual Studio with the
-**Desktop development with C++** workload and Windows SDK.
+Requires Windows x64, Git, CMake 3.24+, CUDA Toolkit **12.8**, and Visual Studio
+with the C++ workload, Windows SDK and MSVC v143 (14.44 tested). NVIDIA's CUDA
+compiler is needed at build time; end users do not need a Toolkit installation.
 
-From the project root, using Visual Studio 2022:
-
-```powershell
-cmake -S . -B build -G "Visual Studio 17 2022" -A x64
-cmake --build build --config Release
-```
-
-For Visual Studio 2026, use the `Visual Studio 18 2026` generator with a CMake
-version that supports it. Use one `build/` directory per checkout. To change
-generators while keeping the portable installation, back up `build/Release/`
-before recreating the build tree.
-
-On first configuration, CMake populates `lib/` with upstream Git checkouts
-of GLFW, Dear ImGui, stb, and stable-diffusion.cpp. Existing checkouts are
-used as-is. The initial revisions are pinned in [CMakeLists.txt](CMakeLists.txt).
-
-To update the engine checkout initially created by CMake:
+To assemble a local Toolkit without installing it system-wide:
 
 ```powershell
-git -C lib/stable-diffusion.cpp switch -c fox-runtime
-git -C lib/stable-diffusion.cpp branch --set-upstream-to=origin/master
-git -C lib/stable-diffusion.cpp pull --ff-only
+./scripts/bootstrap-cuda.ps1
 ```
 
-The first two commands are only needed once for a detached checkout.
-Updating the source changes the C API header used by the build. To update
-the running engine, install binaries from a compatible release and rebuild
-Fox Diffusion against the matching header.
+The script downloads NVIDIA's pinned CUDA 12.8 Update 1 redistributables and
+checks SHA-256 before extraction. In an x64 Native Tools prompt for MSVC v143,
+with Ninja on PATH:
 
-## Engine setup
+```powershell
+cmake -S . -B build/static -G Ninja -DCMAKE_BUILD_TYPE=Release -DCUDAToolkit_ROOT="$PWD/build/toolchain/cuda" -DCMAKE_CUDA_COMPILER="$PWD/build/toolchain/cuda/bin/nvcc.exe"
+cmake --build build/static --config Release -j 6
+```
 
-Generation runs through [stable-diffusion.cpp](https://github.com/leejet/stable-diffusion.cpp).
-The NVIDIA backend uses Windows x64 CUDA 12 and requires a compatible NVIDIA driver.
+For an installed Toolkit with Visual Studio integration, the Visual Studio
+2022 generator (`-G "Visual Studio 17 2022" -A x64`) is also supported by CMake.
+Keep existing `build/Release/` installations intact; use a separate build tree.
+The local verification build uses `-DCMAKE_CUDA_ARCHITECTURES=89` for RTX 4080;
+omit that override for GGML's portable architecture set.
 
-1. Open [release master-889-c678dfe](https://github.com/leejet/stable-diffusion.cpp/releases/tag/master-889-c678dfe),
-   matching the initial engine checkout.
-2. Download the [CUDA 12 engine](https://github.com/leejet/stable-diffusion.cpp/releases/download/master-889-c678dfe/sd-master-c678dfe-bin-win-cuda12-x64.zip)
-   and [CUDA runtime libraries](https://github.com/leejet/stable-diffusion.cpp/releases/download/master-889-c678dfe/cudart-sd-bin-win-cu12-x64.zip).
-3. Extract both archives into `build/Release/cuda-bin/`. Keep `sd-server.exe`,
-   `sd-cli.exe`, and their DLLs together. Do not mix libraries from different releases.
-4. Keep the built `preview-bridge.dll` next to `fox-diffusion.exe`.
+CMake populates `lib/` with pinned upstream GLFW, Dear ImGui, stb and
+stable-diffusion.cpp checkouts. The engine revision is `c678dfe704a2230342376b46add9c8ca736a653d`;
+its GGML submodule is `f583f393cd5dfdc129360bbf75cb3d49ccc837a8`.
+For an existing engine checkout whose GGML directory is empty, run before configuring:
+
+```powershell
+git -C lib/stable-diffusion.cpp submodule update --init ggml
+```
+
+Third-party sources are unmodified. Update the pinned engine and its C API
+integration together; rebuilding the EXE also rebuilds the embedded engine.
+
+## Portable engine
+
+stable-diffusion.cpp, GGML CPU/CUDA backends, CUDA runtime and the VC++ runtime
+are linked statically. There is no engine subprocess, inference HTTP endpoint,
+preview bridge or dynamically loaded GGML plugin. Progress and preview pixels
+arrive through C callbacks; cancellation uses `sd_cancel_generation`.
+
+Copy **only `fox-diffusion.exe`** into a writable folder. The UI opens before
+GPU initialization. The footer displays the driver's maximum CUDA version,
+which is distinct from the engine's CUDA 12.8 build version. A driver reporting
+less than CUDA 12.8, or a missing driver, produces a warning and rejects GPU work.
+
+On the first GPU request, the app checks the GPU, downloads the pinned NVIDIA
+cuBLAS 12.8.4.1 archive over HTTPS, verifies SHA-256 and extracts only the two
+required DLLs and license into `cuda-bin/`. Later processes verify and reuse
+these local DLLs without network access. Interrupted downloads can be retried;
+the verified archive is retained in `cache/` for repair. cuBLAS and the system
+CUDA driver are delay-loaded, while cudart is static.
 
 ```text
-build/Release/
+portable-folder/
 ├── fox-diffusion.exe
-├── preview-bridge.dll
+├── config/
+├── cache/
+├── output/
 └── cuda-bin/
-    ├── sd-server.exe
-    ├── sd-cli.exe
-    ├── stable-diffusion.dll
-    └── … remaining DLLs from both archives
+    ├── cublas64_12.dll
+    ├── cublasLt64_12.dll
+    └── LICENSE
 ```
 
-Existing installations in `backend/` or directly next to the executable still work.
-The engine and model weights are installed separately and are not included
-in this repository. Other versions are available in the
-[official releases](https://github.com/leejet/stable-diffusion.cpp/releases);
-their API compatibility with this interface must be checked separately.
+The first download is approximately 564 MB; allow additional disk space for
+the extracted DLLs. Model files remain separate and can be selected anywhere.
+The app never installs or changes the system NVIDIA driver. Own settings,
+cache, temporary extraction files and default outputs are relative to the EXE.
+An explicitly selected output directory is honored.
+
+Cancellation during sampling is cooperative; an in-flight GPU operation must
+return first. Model loading and an ESRGAN tile finish before cancellation can
+release their resources. Callbacks are removed before the owning backend dies.
 
 ## First run
 
 ```powershell
-.\build\Release\fox-diffusion.exe
+.\build\static\fox-diffusion.exe
 ```
 
 1. In **Models**, select your model folder and refresh the list.
@@ -107,16 +123,21 @@ executable are read if the new files are absent. Images are saved in `output/`. 
 Run image processing tests without a model:
 
 ```powershell
-ctest --test-dir build -C Release --output-on-failure
+ctest --test-dir build/static -C Release --output-on-failure
 ```
 
-The inference smoke test requires an installed engine and model:
+The inference smoke test requires a compatible NVIDIA GPU and a model:
 
 ```powershell
-.\build\Release\img2img-smoke.exe "D:\Models\model.safetensors" 1024
+.\build\static\img2img-smoke.exe "D:\Models\model.safetensors" 1024
 ```
 
-An optional third argument specifies an ESRGAN model path.
+An optional third argument specifies an ESRGAN model path. The smoke test covers
+txt2img, live preview, img2img, protected inpaint pixels, tiled upscaling,
+cancellation during active sampling, and generation after cancellation.
+`cuda-runtime-smoke.exe prepare` exercises runtime installation and reuse;
+without arguments it checks that startup has not loaded cuBLAS/cudart DLLs.
+See [GPU validation](docs/static-engine-validation.md) for the recorded run.
 
 ## Dependencies
 

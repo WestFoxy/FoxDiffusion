@@ -58,7 +58,7 @@ struct GenerationRequest {
     bool preview_denoised = true;
     bool preview_noisy = false;
     Img2ImgOptions img2img;
-    // Already prepared native images; serialized to the server as lossless PNG.
+    // Already prepared native images; passed directly to the embedded engine.
     Raster init_image, mask_image, reference_image;
     float strength = .75f, image_cfg = 1.5f;
     std::string output_label;
@@ -76,6 +76,7 @@ struct GenerationSnapshot {
     int width = 0;
     int height = 0;
     std::uint64_t revision = 0;
+    int preview_count = 0;
     std::vector<std::string> outputs;
     int job_index = 0, job_count = 0;
     int pending_saves = 0;

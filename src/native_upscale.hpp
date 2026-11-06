@@ -8,51 +8,10 @@
 #include <stop_token>
 #include <thread>
 
-// Keep backend modules resident: GGML's registry retains their function pointers.
-// Model tensors and compute buffers are released with each upscaler context.
-struct NativeUpscalerApi {
-    HMODULE module = nullptr;
-    decltype(&new_upscaler_ctx) create = nullptr;
-    decltype(&free_upscaler_ctx) destroy = nullptr;
-    decltype(&upscale) run = nullptr;
-    decltype(&get_upscale_factor) factor = nullptr;
-    decltype(&free_sd_images) free_images = nullptr;
-    explicit NativeUpscalerApi(const std::filesystem::path &directory) {
-        // GGML opens CUDA/CPU plugins using LoadLibraryW. Include the added
-        // backend directory when Windows resolves their CUDA/OpenMP dependencies.
-        if (!SetDefaultDllDirectories(LOAD_LIBRARY_SEARCH_DEFAULT_DIRS))
-            throw std::runtime_error("Cannot initialize backend DLL search paths");
-        const auto cookie = AddDllDirectory(directory.c_str());
-        if (!cookie) throw std::runtime_error("Cannot register backend DLL directory");
-        module = LoadLibraryExW((directory / L"stable-diffusion.dll").c_str(), nullptr,
-                                LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_DEFAULT_DIRS);
-        if (!module) {
-            if (cookie)
-                RemoveDllDirectory(cookie);
-            throw std::runtime_error("Cannot load native upscaler DLL, Windows error " +
-                                     std::to_string(GetLastError()));
-        }
-        create = reinterpret_cast<decltype(create)>(GetProcAddress(module, "new_upscaler_ctx"));
-        destroy = reinterpret_cast<decltype(destroy)>(GetProcAddress(module, "free_upscaler_ctx"));
-        run = reinterpret_cast<decltype(run)>(GetProcAddress(module, "upscale"));
-        factor = reinterpret_cast<decltype(factor)>(GetProcAddress(module, "get_upscale_factor"));
-        free_images = reinterpret_cast<decltype(free_images)>(GetProcAddress(module, "free_sd_images"));
-        if (!create || !destroy || !run || !factor || !free_images)
-            throw std::runtime_error("Installed backend does not expose the native upscaler API");
-        using LoadBackends = void (*)(const char *);
-        auto load = reinterpret_cast<LoadBackends>(
-            GetProcAddress(GetModuleHandleW(L"ggml.dll"), "ggml_backend_load_all_from_path"));
-        if (!load)
-            throw std::runtime_error("Cannot locate GGML backend loader");
-        const auto utf8 = directory.u8string();
-        load(reinterpret_cast<const char *>(utf8.c_str()));
-    }
-};
-
 using UpscalePreview = std::function<void(const Raster &, int, int)>;
 inline Raster native_tiled_upscale(const Raster &source, int width, int height,
-                                   const std::filesystem::path &model, const std::filesystem::path &backend,
-                                   std::stop_token stop, const UpscalePreview &publish) {
+                                   const std::filesystem::path &model, std::stop_token stop,
+                                   const UpscalePreview &publish) {
     checked_image_bytes(width, height);
     require_image_memory(checked_image_bytes(width, height) * 2);
     auto check = [&] {
@@ -60,15 +19,14 @@ inline Raster native_tiled_upscale(const Raster &source, int width, int height,
             throw std::runtime_error("Cancelled");
     };
     check();
-    static NativeUpscalerApi api(backend);
     const auto model_utf8 = model.u8string();
-    std::unique_ptr<upscaler_ctx_t, decltype(api.destroy)> context(
-        api.create(reinterpret_cast<const char *>(model_utf8.c_str()), false,
-                   int(std::max(1u, std::thread::hardware_concurrency() / 2)), 128, "CUDA", "CUDA"),
-        api.destroy);
+    std::unique_ptr<upscaler_ctx_t, decltype(&free_upscaler_ctx)> context(
+        new_upscaler_ctx(reinterpret_cast<const char *>(model_utf8.c_str()), false,
+                         int(std::max(1u, std::thread::hardware_concurrency() / 2)), 128, "CUDA", "CUDA"),
+        free_upscaler_ctx);
     if (!context)
         throw std::runtime_error("Could not load ESRGAN model on CUDA");
-    const int factor = api.factor(context.get());
+    const int factor = get_upscale_factor(context.get());
     if (factor < 1 || factor > 16)
         throw std::runtime_error("Unsupported ESRGAN model scale");
     check();
@@ -96,11 +54,11 @@ inline Raster native_tiled_upscale(const Raster &source, int width, int height,
                 int count = 0;
                 ~Output() {
                     if (images)
-                        api.free_images(images, count);
+                        free_sd_images(images, count);
                 }
             } output;
             const sd_image_t input{uint32_t(iw), uint32_t(ih), 3, rgb.data()};
-            if (!api.run(context.get(), input, uint32_t(factor), &output.images, &output.count) ||
+            if (!upscale(context.get(), input, uint32_t(factor), &output.images, &output.count) ||
                 output.count != 1 || !output.images[0].data)
                 throw std::runtime_error("ESRGAN tile failed; try closing GPU-heavy applications");
             check();

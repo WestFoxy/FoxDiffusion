@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.24)
 
-project(FoxDiffusion VERSION 0.1.0 LANGUAGES CXX)
+project(FoxDiffusion VERSION 0.1.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -12,6 +12,7 @@ if(MSVC)
 endif()
 
 include(FetchContent)
+set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
 
 # Bootstrap missing upstream checkouts. Existing checkouts are managed with Git.
 function(use_local_dependency name)
@@ -58,18 +59,39 @@ FetchContent_Declare(
 use_local_dependency(stb)
 FetchContent_MakeAvailable(stb)
 
-# Use the upstream C API header. The engine itself ships as a separate binary.
+# Engine and every GGML backend are part of the executable.
+set(SD_BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+set(SD_BUILD_SHARED_GGML_LIB OFF CACHE BOOL "" FORCE)
+set(SD_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+set(SD_WEBP OFF CACHE BOOL "" FORCE)
+set(SD_WEBM OFF CACHE BOOL "" FORCE)
+set(SD_CUDA ON CACHE BOOL "" FORCE)
+set(GGML_BACKEND_DL OFF CACHE BOOL "" FORCE)
+set(GGML_STATIC ON CACHE BOOL "" FORCE)
+set(GGML_OPENMP OFF CACHE BOOL "" FORCE)
+set(GGML_NATIVE OFF CACHE BOOL "" FORCE)
+set(CMAKE_CUDA_RUNTIME_LIBRARY Static)
+find_package(CUDAToolkit 12.8 REQUIRED)
 FetchContent_Declare(
     stable-diffusion.cpp
     SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/lib/stable-diffusion.cpp"
-    SOURCE_SUBDIR include
     GIT_REPOSITORY https://github.com/leejet/stable-diffusion.cpp.git
     GIT_TAG c678dfe704a2230342376b46add9c8ca736a653d
-    GIT_SUBMODULES ""
+    GIT_SUBMODULES ggml
 )
 use_local_dependency(stable-diffusion.cpp)
 FetchContent_MakeAvailable(stable-diffusion.cpp)
 set(engine_include "${stable-diffusion.cpp_SOURCE_DIR}/include")
+
+# The downloadable runtime is pinned to CUDA 12.8 Update 1.
+if(NOT CUDAToolkit_VERSION VERSION_GREATER_EQUAL "12.8" OR
+   NOT CUDAToolkit_VERSION VERSION_LESS "12.9")
+    message(FATAL_ERROR "Fox Diffusion requires CUDA Toolkit 12.8 for its pinned portable runtime")
+endif()
+add_library(fox-engine INTERFACE)
+target_link_libraries(fox-engine INTERFACE stable-diffusion delayimp winhttp bcrypt)
+target_link_options(fox-engine INTERFACE /DELAYLOAD:cublas64_12.dll /DELAYLOAD:cublasLt64_12.dll /DELAYLOAD:nvcuda.dll)
+target_sources(fox-engine INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/src/cuda_runtime.cpp)
 
 find_package(OpenGL REQUIRED)
 
@@ -103,14 +125,12 @@ add_executable(fox-diffusion WIN32
     src/img2img_editor.cpp
     src/parameters.cpp
 )
-add_library(preview-bridge SHARED src/preview_bridge.cpp)
-set_target_properties(preview-bridge PROPERTIES PREFIX "" OUTPUT_NAME "preview-bridge")
 target_include_directories(fox-diffusion PRIVATE ${stb_SOURCE_DIR} ${engine_include})
-target_link_libraries(fox-diffusion PRIVATE imgui_lib)
+target_link_libraries(fox-diffusion PRIVATE imgui_lib fox-engine)
 
 if(WIN32)
     target_compile_definitions(fox-diffusion PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
-    target_link_libraries(fox-diffusion PRIVATE ole32 shell32 winhttp crypt32 gdi32)
+    target_link_libraries(fox-diffusion PRIVATE ole32 shell32 gdi32)
 endif()
 
 set_target_properties(fox-diffusion PROPERTIES
@@ -119,6 +139,11 @@ set_target_properties(fox-diffusion PROPERTIES
 
 include(CTest)
 if(BUILD_TESTING)
+    add_executable(cuda-runtime-smoke tests/cuda_runtime_smoke.cpp)
+    target_include_directories(cuda-runtime-smoke PRIVATE src)
+    target_compile_definitions(cuda-runtime-smoke PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
+    target_link_libraries(cuda-runtime-smoke PRIVATE fox-engine)
+    add_test(NAME cuda-deferred-startup COMMAND cuda-runtime-smoke)
     add_executable(img2img-tests tests/img2img_tests.cpp src/raster.cpp src/image_io.cpp src/img2img_pipeline.cpp src/parameters.cpp)
     target_include_directories(img2img-tests PRIVATE src ${stb_SOURCE_DIR})
     target_compile_definitions(img2img-tests PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
@@ -127,5 +152,5 @@ if(BUILD_TESTING)
     add_executable(img2img-smoke tests/img2img_smoke.cpp src/raster.cpp src/image_io.cpp src/img2img_pipeline.cpp src/backend_process.cpp src/parameters.cpp)
     target_include_directories(img2img-smoke PRIVATE src ${stb_SOURCE_DIR} ${engine_include})
     target_compile_definitions(img2img-smoke PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
-    target_link_libraries(img2img-smoke PRIVATE winhttp crypt32 gdi32)
+    target_link_libraries(img2img-smoke PRIVATE fox-engine gdi32)
 endif()
