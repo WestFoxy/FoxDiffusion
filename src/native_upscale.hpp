@@ -1,6 +1,6 @@
 #pragma once
 #include "raster.hpp"
-#include "../third_party/sdcpp-api/stable-diffusion.h"
+#include <stable-diffusion.h>
 #include <windows.h>
 #include <filesystem>
 #include <functional>

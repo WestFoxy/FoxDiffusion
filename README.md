@@ -31,9 +31,26 @@ cmake --build build --config Release
 ```
 
 For Visual Studio 2026, use the `Visual Studio 18 2026` generator with a CMake
-version that supports it. On first configuration, CMake downloads GLFW,
-Dear ImGui, and stb from their official repositories. Dependencies are pinned
-in [CMakeLists.txt](CMakeLists.txt).
+version that supports it. Use one `build/` directory per checkout. To change
+generators while keeping the portable installation, back up `build/Release/`
+before recreating the build tree.
+
+On first configuration, CMake populates `lib/` with upstream Git checkouts
+of GLFW, Dear ImGui, stb, and stable-diffusion.cpp. Existing checkouts are
+used as-is. The initial revisions are pinned in [CMakeLists.txt](CMakeLists.txt).
+
+To update the engine checkout initially created by CMake:
+
+```powershell
+git -C lib/stable-diffusion.cpp switch -c fox-runtime
+git -C lib/stable-diffusion.cpp branch --set-upstream-to=origin/master
+git -C lib/stable-diffusion.cpp pull --ff-only
+```
+
+The first two commands are only needed once for a detached checkout.
+Updating the source changes the C API header used by the build. To update
+the running engine, install binaries from a compatible release and rebuild
+Fox Diffusion against the matching header.
 
 ## Engine setup
 
@@ -41,10 +58,10 @@ Generation runs through [stable-diffusion.cpp](https://github.com/leejet/stable-
 The NVIDIA backend uses Windows x64 CUDA 12 and requires a compatible NVIDIA driver.
 
 1. Open [release master-889-c678dfe](https://github.com/leejet/stable-diffusion.cpp/releases/tag/master-889-c678dfe),
-   pinned in [runtime-manifest.json](backend/runtime-manifest.json).
+   matching the initial engine checkout.
 2. Download the [CUDA 12 engine](https://github.com/leejet/stable-diffusion.cpp/releases/download/master-889-c678dfe/sd-master-c678dfe-bin-win-cuda12-x64.zip)
    and [CUDA runtime libraries](https://github.com/leejet/stable-diffusion.cpp/releases/download/master-889-c678dfe/cudart-sd-bin-win-cu12-x64.zip).
-3. Extract both archives into `build/Release/backend/`. Keep `sd-server.exe`,
+3. Extract both archives into `build/Release/cuda-bin/`. Keep `sd-server.exe`,
    `sd-cli.exe`, and their DLLs together. Do not mix libraries from different releases.
 4. Keep the built `preview-bridge.dll` next to `fox-diffusion.exe`.
 
@@ -52,14 +69,14 @@ The NVIDIA backend uses Windows x64 CUDA 12 and requires a compatible NVIDIA dri
 build/Release/
 ├── fox-diffusion.exe
 ├── preview-bridge.dll
-└── backend/
+└── cuda-bin/
     ├── sd-server.exe
     ├── sd-cli.exe
     ├── stable-diffusion.dll
     └── … remaining DLLs from both archives
 ```
 
-Engine files can also be placed directly next to the application.
+Existing installations in `backend/` or directly next to the executable still work.
 The engine and model weights are installed separately and are not included
 in this repository. Other versions are available in the
 [official releases](https://github.com/leejet/stable-diffusion.cpp/releases);
@@ -80,8 +97,9 @@ Models can be stored outside the application folder. Configure LoRA and
 additional components in Models. Qwen requires separate components;
 see the [editor guide](IMG2IMG.md).
 
-Settings (`settings.ini`), window layout (`layout.ini`), and the `output/`
-folder are stored next to the executable. Configure automatic saving in
+Settings and window layout are stored in `config/settings.ini` and
+`config/layout.ini` next to the executable. Existing INI files beside the
+executable are read if the new files are absent. Images are saved in `output/`. Configure automatic saving in
 **File → Settings**, or save a result manually.
 
 ## Verification
@@ -106,6 +124,3 @@ An optional third argument specifies an ESRGAN model path.
 [Dear ImGui](https://github.com/ocornut/imgui) ·
 [stb](https://github.com/nothings/stb) ·
 [stable-diffusion.cpp](https://github.com/leejet/stable-diffusion.cpp)
-
-Only the engine's required C API header and its
-[MIT license](third_party/sdcpp-api/LICENSE) are included in this repository.

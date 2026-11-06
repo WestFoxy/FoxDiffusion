@@ -5,8 +5,9 @@
 /CMakeFiles/
 /CMakeCache.txt
 /Testing/
-/third_party/*
-!/third_party/sdcpp-api/
+/third_party/
+/lib/
+/config/
 
 # Compiled files and archives
 *.exe

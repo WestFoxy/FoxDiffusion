@@ -14,7 +14,7 @@
 #include <windows.h>
 #endif
 
-// Owns installation and execution of the pinned stable-diffusion.cpp CUDA backend.
+// Runs the stable-diffusion.cpp CUDA backend.
 class BackendProcess {
 public:
     BackendProcess();

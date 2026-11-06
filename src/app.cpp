@@ -130,13 +130,17 @@ constexpr std::array<const char*, 11> scheduler_values = {
     "simple", "smoothstep", "kl_optimal", "lcm", "beta", "gits"
 };
 
-std::filesystem::path settings_directory() {
+std::filesystem::path application_directory() {
 #ifdef _WIN32
     wchar_t value[MAX_PATH]{};
     if (GetModuleFileNameW(nullptr, value, MAX_PATH) != 0)
         return std::filesystem::path(value).parent_path();
 #endif
     return std::filesystem::current_path();
+}
+
+std::filesystem::path settings_directory() {
+    return application_directory() / L"config";
 }
 
 void glfw_error_callback(int error, const char* description) {
@@ -188,7 +192,13 @@ bool App::initialize() {
     const auto settings_root = settings_directory();
     std::error_code directory_error;
     std::filesystem::create_directories(settings_root, directory_error);
-    imgui_ini_path_ = path_to_utf8(settings_root / L"layout.ini");
+    const auto layout = settings_root / L"layout.ini";
+    if (!std::filesystem::exists(layout, directory_error)) {
+        const auto old_layout = application_directory() / L"layout.ini";
+        if (std::filesystem::is_regular_file(old_layout, directory_error))
+            ImGui::LoadIniSettingsFromDisk(path_to_utf8(old_layout).c_str());
+    }
+    imgui_ini_path_ = path_to_utf8(layout);
     io.IniFilename = imgui_ini_path_.c_str();
     apply_theme();
 
@@ -857,6 +867,7 @@ void App::start_generation() {
 
 void App::load_settings() {
     std::ifstream input(settings_directory() / L"settings.ini", std::ios::binary);
+    if (!input) input.open(application_directory() / L"settings.ini", std::ios::binary);
     if (!input) return;
 
     std::string key;

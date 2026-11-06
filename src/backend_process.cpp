@@ -30,6 +30,10 @@ std::filesystem::path executable_directory() {
 std::filesystem::path find_engine(const std::filesystem::path& root) {
     std::error_code error;
     if (!std::filesystem::is_directory(root, error)) return {};
+    for (const auto& directory : {root / L"cuda-bin", root / L"backend", root}) {
+        const auto server = directory / L"sd-server.exe";
+        if (std::filesystem::is_regular_file(server, error)) return server;
+    }
     for (const auto& entry : std::filesystem::recursive_directory_iterator(
              root, std::filesystem::directory_options::skip_permission_denied, error)) {
         if (!error && entry.path().filename() == L"sd-server.exe") return entry.path();
@@ -497,7 +501,7 @@ void BackendProcess::run_single(GenerationRequest request, std::stop_token token
 std::filesystem::path BackendProcess::ensure_backend(std::stop_token token) {
     (void)token;
     auto engine = find_engine(executable_directory());
-    set_status(engine.empty() ? "Put sd-server.exe and CUDA DLLs next to the app" : "CUDA backend ready");
+    set_status(engine.empty() ? "Put sd-server.exe and its DLLs in cuda-bin next to the app" : "CUDA backend ready");
     return engine;
 }
 
