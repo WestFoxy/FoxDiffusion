@@ -57,6 +57,7 @@ class BackendProcess {
     std::mutex context_mutex_;
     sd_ctx_t *context_ = nullptr;
     std::string context_key_;
+    std::string generation_phase_ = "Preparing image";
     mutable std::mutex mutex_;
     std::condition_variable save_cv_;
     std::deque<SaveJob> save_queue_;

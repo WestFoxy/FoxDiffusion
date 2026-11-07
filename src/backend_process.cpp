@@ -3,6 +3,7 @@
 #include "img2img_pipeline.hpp"
 #include "native_upscale.hpp"
 #include "cuda_runtime.hpp"
+#include "app_log.hpp"
 #include <algorithm>
 #include <fstream>
 #include <regex>
@@ -81,6 +82,7 @@ struct Images {
 };
 } // namespace
 BackendProcess::BackendProcess() {
+    sd_set_log_callback(app_log::engine, nullptr);
     backend_status_ = cuda_driver_status();
     save_worker_ = std::jthread([this] { save_outputs(); });
 }
@@ -415,6 +417,18 @@ void BackendProcess::run_single(GenerationRequest request, std::stop_token token
     if (request.model_path.empty())
         throw std::runtime_error("Select a model first");
     ensure_context(request, token);
+    generation_phase_ = "Generating";
+    sd_set_log_callback([](sd_log_level_t level, const char* text, void* user) {
+        app_log::engine(level, text, nullptr);
+        if (!text) return;
+        // Stage names from the pinned upstream; never count VAE work as sampling steps.
+        if (std::string_view(text).find("decoding ") != std::string_view::npos) {
+            auto& self = *static_cast<BackendProcess*>(user);
+            std::scoped_lock lock(self.mutex_);
+            self.generation_phase_ = "Decoding image (VAE)";
+            self.snapshot_.status = self.generation_phase_;
+        }
+    }, this);
     sd_set_progress_callback(
         [](int step, int steps, float, void *user) {
             auto &self = *static_cast<BackendProcess *>(user);
@@ -431,7 +445,7 @@ void BackendProcess::run_single(GenerationRequest request, std::stop_token token
             self.snapshot_.current_step = step;
             self.snapshot_.total_steps = steps;
             self.snapshot_.progress = steps > 0 ? float(step) / steps : 0;
-            self.snapshot_.status = "Engine progress " + std::to_string(step) + " / " + std::to_string(steps);
+            self.snapshot_.status = self.generation_phase_ + "  " + std::to_string(step) + " / " + std::to_string(steps);
         },
         this);
     sd_set_preview_callback(
@@ -454,6 +468,7 @@ void BackendProcess::run_single(GenerationRequest request, std::stop_token token
         request.preview_denoised, request.preview_noisy, this);
     struct Callbacks {
         ~Callbacks() {
+            sd_set_log_callback(app_log::engine, nullptr);
             sd_set_progress_callback(nullptr, nullptr);
             sd_set_preview_callback(nullptr, PREVIEW_NONE, 1, false, false, nullptr);
         }
