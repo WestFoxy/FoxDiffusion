@@ -6,6 +6,7 @@
 
 std::filesystem::path executable_directory();
 std::string cuda_driver_status();
+std::string cuda_version_label();
 bool cuda_driver_compatible();
 // Called only by the inference worker, before any GGML entry point.
 void ensure_cuda_runtime(std::stop_token stop, const std::function<void(std::string)> &status);

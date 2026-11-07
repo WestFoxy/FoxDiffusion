@@ -11,6 +11,7 @@
 
 struct GLFWwindow;
 struct ImVec2;
+struct ImFont;
 
 class App {
 public:
@@ -23,6 +24,7 @@ private:
     void draw_caption_buttons();
     void draw_menu_bar();
     void draw_settings();
+    void draw_console();
     void choose_component(std::string& path);
     void draw_workspace();
     std::string panel_title(const char* name) const;
@@ -43,6 +45,8 @@ private:
     void save_current_image();
     void start_generation();
     void apply_theme();
+    void apply_ui_scale();
+    void update_progress_animation();
     void load_settings();
     void save_settings() const;
 
@@ -53,7 +57,15 @@ private:
     std::string qwen_vae_, qwen_llm_, qwen_vision_;
     bool qwen_offload_ = true, settings_blur_enabled_ = true;
     bool show_telemetry_ = true;
+    bool show_console_ = false;
     int idle_fps_ = 30;
+    int ui_scale_percent_ = 100, applied_ui_scale_ = 0;
+    ImFont* pixel_font_ = nullptr;
+    ImFont* scalable_font_ = nullptr;
+    float displayed_progress_ = 0, progress_target_ = 0;
+    double progress_update_time_ = 0, progress_interval_ = .15;
+    bool progress_was_running_ = false;
+    int progress_steps_ = 0, progress_job_ = 0;
     GLFWwindow* window_ = nullptr;
     ImageTexture preview_texture_;
     std::uint64_t uploaded_revision_ = 0;

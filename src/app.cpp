@@ -1,5 +1,6 @@
 #include "app.hpp"
 #include "cuda_runtime.hpp"
+#include "app_log.hpp"
 #include "image_io.hpp"
 #include "parameters.hpp"
 
@@ -196,6 +197,11 @@ bool App::initialize() {
     }
     imgui_ini_path_ = path_to_utf8(layout);
     io.IniFilename = imgui_ini_path_.c_str();
+    pixel_font_ = io.Fonts->AddFontDefaultBitmap();
+    ImFontConfig font_config;
+    font_config.PixelSnapH = true;
+    font_config.OversampleH = font_config.OversampleV = 1;
+    scalable_font_ = io.Fonts->AddFontDefaultVector(&font_config);
     apply_theme();
 
     if (!ImGui_ImplGlfw_InitForOpenGL(window_, true)) return false;
@@ -240,6 +246,8 @@ void App::render_frame() {
     glfwMakeContextCurrent(window_);
         backend_.poll_snapshot(frame_snapshot_);
         update_preview_texture();
+        if (applied_ui_scale_ != ui_scale_percent_) apply_ui_scale();
+        update_progress_animation();
         ImGui_ImplOpenGL3_NewFrame();
         ImGui_ImplGlfw_NewFrame();
         ImGui::NewFrame();
@@ -253,6 +261,7 @@ void App::render_frame() {
             GImGui->NavWindowingToggleLayer = false;
 
         draw_workspace();
+        draw_console();
         draw_settings();
         if (show_demo_window_) ImGui::ShowDemoWindow(&show_demo_window_);
 
@@ -304,7 +313,7 @@ void App::draw_workspace() {
         ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse;
     ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);
     ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
-    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(8, 9));
+    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(std::round(8 * ui_scale_percent_ / 100.f), std::round(9 * ui_scale_percent_ / 100.f)));
     ImGui::Begin("Fox Diffusion Workspace", nullptr, root_flags);
     ImGui::PopStyleVar();
     ImGui::PopStyleVar(2);
@@ -337,7 +346,7 @@ void App::draw_workspace() {
         }else ImGui::DockBuilderDockWindow(panel_title("Result").c_str(), preview_dock);
         ImGui::DockBuilderFinish(dockspace_id);
     }
-    ImGui::DockSpace(dockspace_id, ImVec2(0, -28), ImGuiDockNodeFlags_PassthruCentralNode);
+    ImGui::DockSpace(dockspace_id, ImVec2(0, -ImGui::GetTextLineHeightWithSpacing() - 8), ImGuiDockNodeFlags_PassthruCentralNode);
     draw_status_bar();
     ImGui::End();
 
@@ -401,8 +410,28 @@ void App::draw_caption_buttons() {
 }
 
 void App::draw_menu_bar() {
-    if (!ImGui::BeginMenuBar()) return;
-    if (ImGui::BeginMenu("File")) {
+    const auto spacing = ImGui::GetStyle().ItemSpacing;
+    ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(0, spacing.y));
+    if (!ImGui::BeginMenuBar()) { ImGui::PopStyleVar(); return; }
+    ImGui::SetCursorScreenPos(ImGui::GetCurrentWindow()->MenuBarRect().Min);
+    auto bar_button = [](const char* label, float width = 0.f) {
+        const auto rect = ImGui::GetCurrentWindow()->MenuBarRect();
+        auto pos = ImGui::GetCursorScreenPos(); pos.y = rect.Min.y;
+        ImGui::SetCursorScreenPos(pos);
+        return ImGui::Button(label, ImVec2(width, rect.GetHeight()));
+    };
+    auto bar_menu = [&](const char* label, const char* popup) {
+        const bool pressed = bar_button(label);
+        const auto min = ImGui::GetItemRectMin(), max = ImGui::GetItemRectMax();
+        const bool another_open = ImGui::IsPopupOpen("File menu") || ImGui::IsPopupOpen("View menu") ||
+                                  ImGui::IsPopupOpen("Preview settings");
+        if (pressed || (another_open && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenBlockedByPopup)))
+            ImGui::OpenPopup(popup);
+        ImGui::SetNextWindowPos(ImVec2(min.x, max.y));
+        return ImGui::BeginPopup(popup);
+    };
+    if (bar_menu("File", "File menu")) {
+        ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, spacing);
         if (ImGui::MenuItem("Choose model folder...")) choose_model_folder();
         const auto& snapshot = frame_snapshot_;
         if (ImGui::MenuItem("Save image as...", "Ctrl+Shift+S", false, !snapshot.rgba.empty())) {
@@ -411,15 +440,16 @@ void App::draw_menu_bar() {
         if (ImGui::MenuItem("Settings...")) { settings_open_=true; settings_capture_=true; }
         ImGui::Separator();
         if (ImGui::MenuItem("Exit", "Alt+F4")) glfwSetWindowShouldClose(window_, GLFW_TRUE);
-        ImGui::EndMenu();
+        ImGui::PopStyleVar(); ImGui::EndPopup();
     }
-    if (ImGui::BeginMenu("View")) {
+    if (bar_menu("View", "View menu")) {
+        ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, spacing);
         if (ImGui::MenuItem("Reset current mode layout")) reset_workspace_layout_ = true;
         ImGui::MenuItem("ImGui demo", nullptr, &show_demo_window_);
-        ImGui::EndMenu();
+        ImGui::PopStyleVar(); ImGui::EndPopup();
     }
-    if (ImGui::Button("Preview")) ImGui::OpenPopup("Preview settings");
-    if (ImGui::BeginPopup("Preview settings")) {
+    if (bar_menu("Preview", "Preview settings")) {
+        ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, spacing);
         ImGui::TextDisabled("LIVE PREVIEW");
         ImGui::SetNextItemWidth(230);
         const char* modes[] = {"Off (fastest)", "Projected (fast)", "Tiny Autoencoder", "Full VAE (slow)"};
@@ -437,12 +467,23 @@ void App::draw_menu_bar() {
             save_settings();
             ImGui::CloseCurrentPopup();
         }
-        ImGui::EndPopup();
+        ImGui::PopStyleVar(); ImGui::EndPopup();
     }
-    if(ImGui::RadioButton("txt2img",!img2img_active_))img2img_active_=false;
-    if(ImGui::RadioButton("img2img",img2img_active_))img2img_active_=true;
+    for (int mode = 0; mode < 2; ++mode) {
+        const bool active = img2img_active_ == bool(mode);
+        ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(active ? ImGuiCol_HeaderActive : ImGuiCol_FrameBg));
+        if (bar_button(mode ? "img2img" : "txt2img", std::round(92 * ui_scale_percent_ / 100.f)))
+            img2img_active_ = bool(mode);
+        if (active) {
+            auto a = ImGui::GetItemRectMin(), b = ImGui::GetItemRectMax();
+            ImGui::GetWindowDrawList()->AddRectFilled(ImVec2(a.x, b.y - 2), b, ImGui::GetColorU32(ImGuiCol_CheckMark));
+        }
+        ImGui::SetItemTooltip(mode ? "Edit, inpaint and upscale an image" : "Create an image from a prompt");
+        ImGui::PopStyleColor();
+    }
     draw_caption_buttons();
     ImGui::EndMenuBar();
+    ImGui::PopStyleVar();
 }
 
 
@@ -558,7 +599,11 @@ void App::draw_preview_panel() {
     }
     const float footer = ImGui::GetFrameHeightWithSpacing();
     draw_output_canvas(*pixels, image_width, image_height, ImVec2(0, std::max(1.f, ImGui::GetContentRegionAvail().y - footer)));
-    if (state.running) ImGui::ProgressBar(state.progress, ImVec2(-1, 0), state.status.c_str());
+    if (state.running || (state.finished && displayed_progress_ < .999f)) {
+        ImGui::PushStyleColor(ImGuiCol_PlotHistogram, ImGui::GetStyleColorVec4(ImGuiCol_SliderGrab));
+        ImGui::ProgressBar(displayed_progress_, ImVec2(-1, 0), state.status.c_str());
+        ImGui::PopStyleColor();
+    }
     else {
         if (!state.save_error.empty()) {
             ImGui::TextColored(ImVec4(1.f, .45f, .35f, 1.f), "Background save failed (hover for details)");
@@ -583,20 +628,67 @@ void App::draw_preview_panel() {
 
 
 void App::draw_status_bar() {
-    // Driver compatibility must remain visible even with telemetry disabled.
-    ImGui::SetCursorPosY(ImGui::GetWindowHeight() - 25.0f);
+    ImGui::SetCursorPosY(ImGui::GetWindowHeight() - ImGui::GetTextLineHeightWithSpacing() - 5);
     ImGui::Separator();
-    ImGui::TextColored(cuda_driver_compatible() ? ImVec4(.65f,.75f,.65f,1) : ImVec4(1,.65f,.3f,1), "%s", cuda_driver_status().c_str());
-    if(!show_telemetry_)return;
-    ImGui::SameLine();
-    const Telemetry telemetry = read_telemetry();
-    if (telemetry.gpu >= 0.0f)
-        ImGui::TextDisabled("FPS %.0f   CPU %.0f%%   GPU %.0f%%   RAM %.1f / %.1f GB   VRAM %.1f / %.1f GB",
-                            ImGui::GetIO().Framerate, telemetry.cpu, telemetry.gpu, telemetry.ram_used_gb, telemetry.ram_total_gb,
-                            telemetry.vram_used_gb, telemetry.vram_total_gb);
-    else
-        ImGui::TextDisabled("FPS %.0f   CPU %.0f%%   RAM %.1f / %.1f GB   GPU/VRAM unavailable",
-                            ImGui::GetIO().Framerate, telemetry.cpu, telemetry.ram_used_gb, telemetry.ram_total_gb);
+    const bool compatible = cuda_driver_compatible();
+    ImGui::TextColored(compatible ? ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled) : ImVec4(1,.65f,.3f,1),
+                       "%s", cuda_version_label().c_str());
+    ImGui::SetItemTooltip("%s\nnv: maximum CUDA version supported by the NVIDIA driver\nlib: embedded engine's CUDA version", cuda_driver_status().c_str());
+    if (!compatible) {
+        ImGui::SameLine(); ImGui::TextColored(ImVec4(1,.65f,.3f,1), "Driver update required");
+        return;
+    }
+    if (!show_telemetry_) return;
+    const auto t = read_telemetry();
+    auto metric = [](const char* label, const char* value) {
+        const float needed = ImGui::CalcTextSize(label).x + ImGui::CalcTextSize(value).x + 30;
+        if (ImGui::GetItemRectMax().x + needed > ImGui::GetWindowPos().x + ImGui::GetWindowContentRegionMax().x) return;
+        ImGui::SameLine(0, 10);
+        auto p = ImGui::GetCursorScreenPos();
+        ImGui::GetWindowDrawList()->AddLine(ImVec2(p.x, p.y+2), ImVec2(p.x,p.y+ImGui::GetTextLineHeight()-2), IM_COL32(150,160,180,45));
+        ImGui::Dummy(ImVec2(1, ImGui::GetTextLineHeight()));
+        ImGui::SameLine(0, 10); ImGui::TextDisabled("%s", label);
+        ImGui::SameLine(0, 5); ImGui::TextUnformatted(value);
+    };
+    char value[64];
+    std::snprintf(value,sizeof(value),"%.0f",ImGui::GetIO().Framerate); metric("FPS",value);
+    std::snprintf(value,sizeof(value),"%.0f%%",t.cpu); metric("CPU",value);
+    if(t.gpu>=0){std::snprintf(value,sizeof(value),"%.0f%%",t.gpu);metric("GPU",value);}
+    std::snprintf(value,sizeof(value),"%.1f / %.1f GB",t.ram_used_gb,t.ram_total_gb);metric("RAM",value);
+    if(t.gpu>=0){std::snprintf(value,sizeof(value),"%.1f / %.1f GB",t.vram_used_gb,t.vram_total_gb);metric("VRAM",value);}
+}
+
+void App::update_progress_animation() {
+    const auto& state = frame_snapshot_;
+    const double now = glfwGetTime();
+    const float target = std::clamp(state.finished && !state.running ? 1.f : state.progress, 0.f, 1.f);
+    const bool new_phase = (state.running && !progress_was_running_) ||
+        (state.running && (target + .001f < progress_target_ || state.total_steps != progress_steps_ || state.job_index != progress_job_));
+    if (new_phase) { displayed_progress_ = 0; progress_interval_ = .15; progress_update_time_ = now; }
+    if (target != progress_target_) {
+        const double elapsed = now - progress_update_time_;
+        if (!new_phase && elapsed > 0) progress_interval_ = std::clamp(elapsed, .04, .35);
+        progress_update_time_ = now;
+    }
+    const float gap = std::abs(target - displayed_progress_);
+    const float tau = float(std::clamp(progress_interval_ * .45 / (1 + gap * 4), .025, .14));
+    displayed_progress_ += (target - displayed_progress_) * (1 - std::exp(-ImGui::GetIO().DeltaTime / tau));
+    if (std::abs(target - displayed_progress_) < .0005f) displayed_progress_ = target;
+    progress_target_ = target; progress_was_running_ = state.running;
+    progress_steps_ = state.total_steps; progress_job_ = state.job_index;
+}
+
+void App::apply_ui_scale() {
+    ui_scale_percent_ = std::clamp(ui_scale_percent_, 100, 200);
+    ImGui::GetStyle() = ImGuiStyle();
+    apply_theme();
+    const float scale = ui_scale_percent_ / 100.f;
+    auto& style = ImGui::GetStyle();
+    style.ScaleAllSizes(scale);
+    style.FontSizeBase = std::round(13.f * scale);
+    style.FontScaleMain = 1.f;
+    ImGui::GetIO().FontDefault = ui_scale_percent_ == 100 ? pixel_font_ : scalable_font_;
+    applied_ui_scale_ = ui_scale_percent_;
 }
 
 void App::update_preview_texture() {
@@ -890,7 +982,9 @@ void App::load_settings() {
         else if (key == "qwen_vision") input >> std::quoted(qwen_vision_);
         else if (key == "qwen_offload") input >> qwen_offload_;
         else if (key == "settings_blur") input >> settings_blur_enabled_;
+        else if (key == "ui_scale") { input >> ui_scale_percent_; ui_scale_percent_ = std::clamp(ui_scale_percent_, 100, 200); }
         else if (key == "show_telemetry") input >> show_telemetry_;
+        else if (key == "show_console") input >> show_console_;
         else if (key == "idle_fps") input >> idle_fps_;
         else if (key == "steps") input >> steps_;
         else if (key == "width") input >> width_;
@@ -969,7 +1063,7 @@ void App::save_settings() const {
            << "show_demo " << show_demo_window_ << '\n';
     output<<"auto_save_txt "<<auto_save_txt_<<"\nauto_save_img "<<auto_save_img_<<"\nmodel_type "<<model_type_
         <<"\nqwen_vae "<<std::quoted(qwen_vae_)<<"\nqwen_llm "<<std::quoted(qwen_llm_)<<"\nqwen_vision "<<std::quoted(qwen_vision_)
-        <<"\nqwen_offload "<<qwen_offload_<<"\nsettings_blur "<<settings_blur_enabled_<<"\nshow_telemetry "<<show_telemetry_<<"\nidle_fps "<<idle_fps_<<"\n";
+        <<"\nqwen_offload "<<qwen_offload_<<"\nsettings_blur "<<settings_blur_enabled_<<"\nshow_telemetry "<<show_telemetry_<<"\nshow_console "<<show_console_<<"\nui_scale "<<ui_scale_percent_<<"\nidle_fps "<<idle_fps_<<"\n";
     for(const auto& [name,c]:ui_colors_)output<<"ui_color "<<std::quoted(name)<<' '<<c[0]<<' '<<c[1]<<' '<<c[2]<<' '<<c[3]<<'\n';
     img2img_.save_settings(output);
     output<<"workspace_img2img "<<img2img_active_<<'\n';
@@ -998,6 +1092,7 @@ void App::apply_theme() {
 
     auto& c = style.Colors;
     c[ImGuiCol_WindowBg] = ImVec4(0.055f, 0.061f, 0.078f, 1.0f);
+    c[ImGuiCol_MenuBarBg] = ImVec4(0.045f, 0.050f, 0.065f, 1.0f);
     c[ImGuiCol_ChildBg] = ImVec4(0.065f, 0.071f, 0.092f, 1.0f);
     c[ImGuiCol_PopupBg] = ImVec4(0.075f, 0.081f, 0.105f, 0.98f);
     c[ImGuiCol_Border] = ImVec4(0.17f, 0.19f, 0.24f, 1.0f);
@@ -1006,8 +1101,8 @@ void App::apply_theme() {
     c[ImGuiCol_FrameBgActive] = ImVec4(0.18f, 0.20f, 0.27f, 1.0f);
     c[ImGuiCol_TitleBg] = ImVec4(0.045f, 0.050f, 0.065f, 1.0f);
     c[ImGuiCol_TitleBgActive] = ImVec4(0.075f, 0.08f, 0.11f, 1.0f);
-    c[ImGuiCol_Button] = ImVec4(0.36f, 0.24f, 0.69f, 1.0f);
-    c[ImGuiCol_ButtonHovered] = ImVec4(0.46f, 0.32f, 0.83f, 1.0f);
+    c[ImGuiCol_Button] = ImVec4(0.14f, 0.15f, 0.21f, 1.0f);
+    c[ImGuiCol_ButtonHovered] = ImVec4(0.28f, 0.23f, 0.43f, 1.0f);
     c[ImGuiCol_ButtonActive] = ImVec4(0.31f, 0.20f, 0.61f, 1.0f);
     c[ImGuiCol_Header] = ImVec4(0.28f, 0.20f, 0.52f, 0.8f);
     c[ImGuiCol_HeaderHovered] = ImVec4(0.39f, 0.28f, 0.70f, 0.9f);
@@ -1020,5 +1115,6 @@ void App::apply_theme() {
         if(found!=ui_colors_.end()){const auto& v=found->second;c[i]=ImVec4(v[0],v[1],v[2],v[3]);} }
 }
 #include "app_settings.inl"
+#include "app_console.inl"
 
 #include "app_panels.inl"

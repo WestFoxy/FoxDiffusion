@@ -94,11 +94,11 @@ void App::draw_settings() {
         ImGui::PopStyleVar();
     }
     ImGui::SetNextWindowSize(
-        ImVec2(std::min(740.f, viewport->WorkSize.x - 32), std::min(560.f, viewport->WorkSize.y - 32)),
-        ImGuiCond_Appearing);
+        ImVec2(std::min(740.f * ui_scale_percent_ / 100.f, viewport->WorkSize.x - 32), std::min(560.f * ui_scale_percent_ / 100.f, viewport->WorkSize.y - 32)),
+        ImGuiCond_Always);
     ImGui::SetNextWindowPos(ImVec2(viewport->WorkPos.x + viewport->WorkSize.x * .5f,
                                    viewport->WorkPos.y + viewport->WorkSize.y * .5f),
-                            ImGuiCond_Appearing, ImVec2(.5f, .5f));
+                            ImGuiCond_Always, ImVec2(.5f, .5f));
     ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.f);
     if (ImGui::BeginPopupModal("Settings", &settings_open_,
                                ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoResize |
@@ -125,8 +125,22 @@ void App::draw_settings() {
             }
             if (ImGui::BeginTabItem("Interface")) {
                 ImGui::BeginChild("interfacePrefs", ImVec2(0, -48));
+                ImGui::SeparatorText("Interface scale");
+                const int scales[] = {100, 115, 125, 150, 175, 200};
+                for (int percent : scales) {
+                    if (percent != 100) ImGui::SameLine();
+                    char label[16]; std::snprintf(label, sizeof(label), "%d%%", percent);
+                    const bool selected = ui_scale_percent_ == percent;
+                    if (selected) ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_HeaderActive));
+                    if (ImGui::Button(label)) { ui_scale_percent_ = percent; changed = true; }
+                    if (selected) ImGui::PopStyleColor();
+                }
+                ImGui::TextWrapped("Text is rasterized at the selected pixel size. Changes apply immediately; 100%% keeps the original pixel font.");
+                ImGui::Spacing();
                 ImGui::SeparatorText("Workspace");
                 changed |= ImGui::Checkbox("Show performance statistics", &show_telemetry_);
+                changed |= ImGui::Checkbox("Show terminal / engine logs", &show_console_);
+                ImGui::SetItemTooltip("Dock Terminal anywhere. Captures engine logs and stdout/stderr; keeps the latest 4,000 lines.");
                 if (ImGui::Checkbox("One prompt per line", &prompt_one_per_line_)) {
                     changed = true;
                     prompt_layout_initialized_ = false;
@@ -162,7 +176,7 @@ void App::draw_settings() {
                 ImGui::TextDisabled("Changes apply immediately and are stored in settings.ini.");
                 if (ImGui::Button("Reset all colors")) {
                     ui_colors_.clear();
-                    apply_theme();
+                    applied_ui_scale_ = 0;
                     changed = true;
                 }
                 static ImGuiTextFilter filter;

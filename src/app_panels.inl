@@ -36,14 +36,16 @@ void App::draw_prompt_panel() {
         !workspace_mode_ ||
         (img2img_.options.mode == 5 ? !img2img_.options.input_dir.empty() : img2img_.has_source());
     if (state.running) {
-        if (ImGui::Button("Cancel generation", ImVec2(-1, 38)))
+        if (ImGui::Button("Cancel generation", ImVec2(-1, std::round(38 * ui_scale_percent_ / 100.f))))
             backend_.cancel();
         ImGui::TextWrapped("%s", state.status.c_str());
         ImGui::SetItemTooltip("Edits to parameters apply to your next generation.");
     } else {
         ImGui::BeginDisabled(!selected || !source_ready);
-        if (ImGui::Button(workspace_mode_ ? "Generate edit" : "Generate image", ImVec2(-1, 38)))
+        ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_HeaderActive));
+        if (ImGui::Button(workspace_mode_ ? "Generate edit" : "Generate image", ImVec2(-1, std::round(38 * ui_scale_percent_ / 100.f))))
             start_generation();
+        ImGui::PopStyleColor();
         ImGui::EndDisabled();
         if (!source_ready)
             ImGui::TextWrapped(img2img_.options.mode == 5
@@ -84,14 +86,21 @@ void App::draw_prompt_panel() {
         ImGui::TableNextRow();
         ImGui::TableSetColumnIndex(0);
         ImGui::TextUnformatted("Width");
+        ImGui::TableSetColumnIndex(1);
+        ImGui::TextUnformatted("Height");
+        ImGui::TableNextRow();
+        ImGui::TableSetColumnIndex(0);
         ImGui::SetNextItemWidth(-1);
         ImGui::InputInt("##width", &width_, 64);
         ImGui::TableSetColumnIndex(1);
-        ImGui::TextUnformatted("Height");
         ImGui::SetNextItemWidth(-1);
         ImGui::InputInt("##height", &height_, 64);
         ImGui::EndTable();
     }
+    if (ImGui::SmallButton("Swap W / H")) std::swap(width_, height_);
+    ImGui::SetItemTooltip("Switch between portrait and landscape without changing the pixel count.");
+    ImGui::SameLine();
+    ImGui::TextDisabled("%.2f MP", double(width_) * height_ / 1000000.);
     width_ = std::clamp(width_, 64, 4096);
     height_ = std::clamp(height_, 64, 4096);
     if (workspace_mode_) {

@@ -205,6 +205,11 @@ std::filesystem::path executable_directory() {
 bool cuda_driver_compatible() {
     return driver().version >= required_driver;
 }
+std::string cuda_version_label() {
+    const int v = driver().version;
+    return "CUDA [ nv " + (v ? std::to_string(v / 1000) + "." + std::to_string(v % 1000 / 10) : "--") +
+           " | lib 12.8 ]";
+}
 std::string cuda_driver_status() {
     const int v = driver().version;
     if (!v)
